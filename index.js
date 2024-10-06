@@ -1,4 +1,3 @@
-HEAD
 // index.js
 require('dotenv').config();
 const { Client, GatewayIntentBits, Partials } = require('discord.js');
@@ -159,7 +158,6 @@ client.on('interactionCreate', async interaction => {
 client.login(process.env.DISCORD_TOKEN).catch(error => {
     console.error('Failed to login:', error);
 });
->>>>>>>
 // index.js
 require('dotenv').config();
 const { Client, GatewayIntentBits, Partials } = require('discord.js');
@@ -320,4 +318,3 @@ client.on('interactionCreate', async interaction => {
 client.login(process.env.DISCORD_TOKEN).catch(error => {
     console.error('Failed to login:', error);
 });
-36a987936c47c9e6808c6e22094498c31362363e
