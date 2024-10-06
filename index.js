@@ -1,15 +1,16 @@
 // index.js
 require('dotenv').config();
-const { Client, Intents, MessageEmbed } = require('discord.js');
+const { Client, GatewayIntentBits, Partials } = require('discord.js');
 const { Configuration, OpenAIApi } = require('openai');
 
 // Initialize Discord Client
 const client = new Client({
     intents: [
-        Intents.FLAGS.GUILDS,
-        Intents.FLAGS.GUILD_MESSAGES,
-        Intents.FLAGS.MESSAGE_CONTENT
-    ]
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent
+    ],
+    partials: [Partials.Channel]
 });
 
 // Initialize OpenAI
@@ -23,29 +24,35 @@ const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 client.once('ready', () => {
     console.log(`Logged in as ${client.user.tag}!`);
+    registerCommands();
 });
 
-// Registering Slash Command
-client.on('ready', async () => {
-    const guilds = await client.guilds.fetch();
+// Function to register slash commands
+async function registerCommands() {
+    try {
+        const guilds = await client.guilds.fetch();
+        guilds.forEach(async (guild) => {
+            const commands = guild.commands;
 
-    guilds.forEach(async (guild) => {
-        const commands = guild.commands;
+            await commands.create({
+                name: 'summarize',
+                description: 'Summarize a user\'s messages from the past 12 months',
+                options: [
+                    {
+                        name: 'username',
+                        type: 6, // USER type
+                        description: 'The user to summarize',
+                        required: true,
+                    },
+                ],
+            });
 
-        await commands.create({
-            name: 'summarize',
-            description: 'Summarize a user\'s messages from the past 12 months',
-            options: [
-                {
-                    name: 'username',
-                    type: 'USER',
-                    description: 'The user to summarize',
-                    required: true,
-                },
-            ],
+            console.log(`Registered /summarize command for guild: ${guild.name}`);
         });
-    });
-});
+    } catch (error) {
+        console.error('Error registering commands:', error);
+    }
+}
 
 client.on('interactionCreate', async interaction => {
     if (!interaction.isCommand()) return;
@@ -54,10 +61,18 @@ client.on('interactionCreate', async interaction => {
         const user = interaction.options.getUser('username');
         await interaction.deferReply();
 
-        const statusMessage = await interaction.followUp({
-            content: `Fetching messages: ${user.tag}\nMessages fetched: 0`,
-            fetchReply: true
-        });
+        let statusMessage;
+        try {
+            statusMessage = await interaction.followUp({
+                content: `Fetching messages: ${user.tag}\nMessages fetched: 0`,
+                fetchReply: true
+            });
+            console.log(`Started fetching messages for ${user.tag}`);
+        } catch (error) {
+            console.error('Error sending status message:', error);
+            await interaction.editReply('Failed to send status message.');
+            return;
+        }
 
         let fetchedMessages = [];
         let lastMessageId = null;
@@ -70,7 +85,15 @@ client.on('interactionCreate', async interaction => {
                 options.before = lastMessageId;
             }
 
-            const messages = await interaction.channel.messages.fetch(options);
+            let messages;
+            try {
+                messages = await interaction.channel.messages.fetch(options);
+            } catch (error) {
+                console.error('Error fetching messages:', error);
+                await interaction.editReply('Failed to fetch messages.');
+                return;
+            }
+
             if (messages.size === 0) break;
 
             const userMessages = messages.filter(msg => msg.author.id === user.id && msg.createdTimestamp >= oneYearAgo);
@@ -78,7 +101,12 @@ client.on('interactionCreate', async interaction => {
             totalFetched += userMessages.size;
 
             // Update status message
-            await statusMessage.edit(`Fetching messages: ${user.tag}\nMessages fetched: ${totalFetched}`);
+            try {
+                await statusMessage.edit(`Fetching messages: ${user.tag}\nMessages fetched: ${totalFetched}`);
+                console.log(`Fetched ${totalFetched} messages so far.`);
+            } catch (error) {
+                console.error('Error updating status message:', error);
+            }
 
             lastMessageId = messages.last().id;
 
@@ -92,6 +120,7 @@ client.on('interactionCreate', async interaction => {
 
         // Combine all messages into a single text
         const combinedText = fetchedMessages.join('\n');
+        console.log(`Total messages fetched: ${totalFetched}`);
 
         // Use OpenAI to summarize
         try {
@@ -106,6 +135,7 @@ client.on('interactionCreate', async interaction => {
             });
 
             const summary = response.data.choices[0].message.content;
+            console.log('Summary generated successfully.');
 
             // Send the summary
             await interaction.followUp({
@@ -116,7 +146,7 @@ client.on('interactionCreate', async interaction => {
             // Delete the status message
             await statusMessage.delete();
         } catch (error) {
-            console.error(error);
+            console.error('Error with OpenAI API:', error);
             await interaction.followUp({
                 content: 'An error occurred while summarizing the messages.',
                 ephemeral: true
@@ -125,4 +155,6 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-client.login(process.env.DISCORD_TOKEN);
+client.login(process.env.DISCORD_TOKEN).catch(error => {
+    console.error('Failed to login:', error);
+});
